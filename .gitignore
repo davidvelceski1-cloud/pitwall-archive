@@ -1,0 +1,12 @@
+node_modules
+.next
+next-env.d.ts
+*.tsbuildinfo
+.env
+.env.local
+# Raw API cache — regenerate with `npm run data:fetch`
+data/raw
+.vercel
+
+# Logs
+*.log

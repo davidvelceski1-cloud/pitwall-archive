@@ -1,0 +1,193 @@
+// Pitwall Archive — relational schema (PostgreSQL).
+// Stats tables mirror data/generated/*; editorial text lives separately with a source and
+// last-reviewed date. Seed with `npm run db:push && npm run db:seed`.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+model Season {
+  year                 Int                   @id
+  rounds               Int
+  status               String // complete | in-progress | upcoming
+  detailed             Boolean               @default(false)
+  races                Race[]
+  driverStandings      DriverStanding[]
+  constructorStandings ConstructorStanding[]
+}
+
+model Circuit {
+  id       String @id // Jolpica circuitId
+  name     String
+  locality String
+  country  String
+  lat      Float
+  lng      Float
+  wiki     String?
+  races    Race[]
+}
+
+model Driver {
+  id          String           @id // Jolpica driverId
+  slug        String           @unique
+  givenName   String
+  familyName  String
+  nationality String
+  dob         DateTime?        @db.Date
+  code        String?
+  number      String?
+  wiki        String?
+  results     Result[]
+  qualifying  Qualifying[]
+  standings   DriverStanding[]
+}
+
+model Constructor {
+  id          String                @id // Jolpica constructorId
+  slug        String
+  name        String
+  nationality String
+  /// Profiled team this constructor id belongs to (e.g. "brabham-repco" → "brabham")
+  teamKey     String?
+  results     Result[]
+  qualifying  Qualifying[]
+  standings   ConstructorStanding[]
+  successors  ConstructorLineage[]  @relation("predecessor")
+  predecessors ConstructorLineage[] @relation("successor")
+}
+
+model Race {
+  id                 String       @id // "{season}-{round}"
+  season             Int
+  round              Int
+  name               String
+  date               DateTime     @db.Date
+  circuitId          String
+  wiki               String?
+  winnerDriverId     String?
+  winnerConstructorId String?
+  poleDriverId       String?
+  poleSource         String? // qualifying | grid
+  fastestLapDriverId String?
+  fastestLapTime     String?
+  seasonRef          Season       @relation(fields: [season], references: [year])
+  circuit            Circuit      @relation(fields: [circuitId], references: [id])
+  results            Result[]
+  qualifying         Qualifying[]
+
+  @@unique([season, round])
+  @@index([circuitId])
+  @@index([winnerDriverId])
+}
+
+model Result {
+  id             Int         @id @default(autoincrement())
+  raceId         String
+  driverId       String
+  constructorId  String
+  number         String?
+  grid           Int
+  position       Int?
+  positionText   String
+  points         Float
+  status         String
+  laps           Int
+  time           String?
+  fastestLapRank Int?
+  fastestLapTime String?
+  race           Race        @relation(fields: [raceId], references: [id])
+  driver         Driver      @relation(fields: [driverId], references: [id])
+  constructor    Constructor @relation(fields: [constructorId], references: [id])
+
+  @@index([raceId])
+  @@index([driverId])
+  @@index([constructorId])
+}
+
+model Qualifying {
+  id            Int         @id @default(autoincrement())
+  raceId        String
+  driverId      String
+  constructorId String
+  position      Int
+  q1            String?
+  q2            String?
+  q3            String?
+  race          Race        @relation(fields: [raceId], references: [id])
+  driver        Driver      @relation(fields: [driverId], references: [id])
+  constructor   Constructor @relation(fields: [constructorId], references: [id])
+
+  @@index([raceId])
+}
+
+model DriverStanding {
+  season         Int
+  driverId       String
+  position       Int?
+  points         Float
+  wins           Int
+  constructorIds String[]
+  seasonRef      Season   @relation(fields: [season], references: [year])
+  driver         Driver   @relation(fields: [driverId], references: [id])
+
+  @@id([season, driverId])
+}
+
+model ConstructorStanding {
+  season        Int
+  constructorId String
+  position      Int?
+  points        Float
+  wins          Int
+  seasonRef     Season      @relation(fields: [season], references: [year])
+  constructor   Constructor @relation(fields: [constructorId], references: [id])
+
+  @@id([season, constructorId])
+}
+
+/// How team entries evolved: predecessor → successor.
+model ConstructorLineage {
+  id            Int         @id @default(autoincrement())
+  predecessorId String
+  successorId   String
+  year          Int
+  type          String // rebrand | takeover | merger
+  note          String?
+  predecessor   Constructor @relation("predecessor", fields: [predecessorId], references: [id])
+  successor     Constructor @relation("successor", fields: [successorId], references: [id])
+
+  @@unique([predecessorId, successorId, year])
+}
+
+/// Narrative/editorial text, stored apart from statistics.
+model Editorial {
+  id           Int      @id @default(autoincrement())
+  entityType   String // season | team | driver | circuit | era
+  entityId     String
+  section      String // e.g. "story", "chapter:1960s", "bio"
+  title        String?
+  body         String // may contain [[d:senna]]-style entity tokens
+  source       String
+  lastReviewed DateTime @db.Date
+
+  @@index([entityType, entityId])
+}
+
+/// Retrieval chunks for "Ask the Archive". The app ships with in-process BM25 retrieval;
+/// fill `embedding` with an embedding model to switch to pgvector similarity search.
+model ArchiveChunk {
+  id        String                       @id // e.g. "driver:senna"
+  kind      String
+  title     String
+  href      String
+  content   String
+  embedding Unsupported("vector(1024)")?
+  updatedAt DateTime                     @updatedAt
+}

@@ -1,0 +1,37 @@
+# Nightly job: refresh the current season from Jolpica-F1 and commit the regenerated
+# archive. Vercel redeploys on push, so every page (including the current season)
+# is rebuilt statically with the new results.
+name: Nightly current-season refresh
+
+on:
+  schedule:
+    - cron: "30 4 * * *" # 04:30 UTC, after Sunday races have been published
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Restore the raw API cache so only current-season responses are re-fetched.
+      - uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: jolpica-raw-${{ github.run_id }}
+          restore-keys: jolpica-raw-
+      - run: npm run data:refresh-current
+      - name: Commit if anything changed
+        run: |
+          git config user.name "pitwall-bot"
+          git config user.email "pitwall-bot@users.noreply.github.com"
+          git add data/generated
+          git diff --cached --quiet || git commit -m "data: nightly refresh of the current season"
+          git push
